@@ -10,6 +10,8 @@ use esp_idf_svc::{
     wifi::{BlockingWifi, EspWifi},
 };
 
+use esp_idf_svc::hal::delay::FreeRtos;
+use esp_idf_svc::hal::gpio::{PinDriver, Pull};
 use log::*;
 
 const WIFI_SSID: &str = env!("OSC_WIFI_SSID");
@@ -26,14 +28,6 @@ fn main() -> anyhow::Result<()> {
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
-    let mut wifi = BlockingWifi::wrap(
-        EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
-        sys_loop,
-    )?;
-
-    let ip = connect_wifi(&mut wifi, WIFI_SSID, WIFI_PASS)?;
-    info!("IP INFO!!! {:?}", ip);
-
     // Create thread to get heart rate
     // put tx in this heart rate thread
     // (don't put it in the function, that will poll the heart rate sensor, but the thread)
@@ -42,6 +36,31 @@ fn main() -> anyhow::Result<()> {
 
     // let (tx, rx) = mpsc::channel();
 
+    let mut led = PinDriver::output(peripherals.pins.gpio20)?;
+    let mut button = PinDriver::input(peripherals.pins.gpio9)?;
+
+    button.set_pull(Pull::Down)?;
+    let mut led_flag = true;
+
+    loop {
+        // we are using thread::sleep here to make sure the watchdog isn't triggered
+        FreeRtos::delay_ms(500);
+
+        if led_flag == true {
+            led_flag = false;
+            led.set_high()?;
+        } else {
+            led_flag = true;
+            led.set_low()?;
+        }
+        /*
+        if button.is_high() {
+            led.set_low()?;
+        } else {
+            led.set_high()?;
+        }
+        */
+    }
     // the heart rate sensor lib will have to take the pin used to receive the data
     // it will look for any changes from 0 to 1 on that pin
     // use the averaged distance between all heart beats
@@ -61,6 +80,14 @@ fn main() -> anyhow::Result<()> {
     // where first, second and next are the differences between two beats.
     // use modulo to get every 10 seconds
     // and reset last_time_of_peak to None, when last_time > this_time
+
+    let mut wifi = BlockingWifi::wrap(
+        EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
+        sys_loop,
+    )?;
+
+    let ip = connect_wifi(&mut wifi, WIFI_SSID, WIFI_PASS)?;
+    info!("IP INFO!!! {:?}", ip);
 
     // Create thread to receive/send OSC
     // Larger stack size is required (default is 3 KB)
