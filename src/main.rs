@@ -37,41 +37,87 @@ fn main() -> anyhow::Result<()> {
     // let (tx, rx) = mpsc::channel();
 
     let mut led = PinDriver::output(peripherals.pins.gpio20)?;
-    let mut button = PinDriver::input(peripherals.pins.gpio3)?;
+    let mut heartbeat = PinDriver::input(peripherals.pins.gpio3)?;
 
-    button.set_pull(Pull::Down)?;
-    let mut led_flag = true;
+    heartbeat.set_pull(Pull::Down)?;
 
+    let mut heart_was_low = true;
+
+    // create a timer
+    let mut added_ms = 0.0;
+    let mut last_added_ms = 0.0;
+    let reset_time = 10000.0;
+
+    // last measured peak in ms
+    let mut potential_current_peak: Option<f32> = None;
+    let mut potential_last_peak: Option<f32> = None;
+
+    // the difference between peaks
+    let mut avg_difference = 0.0;
+
+    /*
+    info!("it's low");
+    led.set_low()?;
+    */
+
+    // TODO
+    // this code be cleaner, if there was an "initialize" function, where no peak and no average
+    // was set yet
+    // and then a normal calculate function
     loop {
         // we are using thread::sleep here to make sure the watchdog isn't triggered
         FreeRtos::delay_ms(10);
-        if button.is_high() {
-            info!("it's high");
-            led.set_high()?;
-        } else {
-            info!("it's low");
-            led.set_low()?;
+
+        added_ms += 10.0;
+
+        // every 10 seconds, it gets reset
+        if added_ms < last_added_ms {
+            // use difference = current_peak - (last_peak -10);
         }
+        added_ms = added_ms % reset_time;
+
+        if heartbeat.is_high() && heart_was_low {
+            // set current_peak
+            potential_current_peak = Some(added_ms);
+            heart_was_low = false;
+        }
+        if heartbeat.is_low() {
+            heart_was_low = true;
+        }
+
+        if let Some(current_peak) = potential_current_peak {
+            potential_current_peak = None;
+
+            if let Some(last_peak) = potential_last_peak {
+                // When the time resets, we need a different calculation for current difference
+                let difference;
+                if added_ms < last_added_ms {
+                    difference = current_peak - (last_peak - reset_time);
+                } else {
+                    difference = current_peak - last_peak;
+                }
+
+                potential_last_peak = Some(current_peak);
+
+                if avg_difference == 0.0 {
+                    avg_difference = difference;
+                } else {
+                    avg_difference = (avg_difference + difference) / 2.0;
+                }
+            } else {
+                potential_last_peak = Some(current_peak);
+            }
+        }
+
+        // 60 = 1000 / 1000 * 60
+        // 30 = 1000 / 2000 * 60
+        // 120 = 1000 / 500 * 60
+
+        if avg_difference > 0.0 {
+            info!("The bpm is: {:?}", (1000.0 / avg_difference) * 60.0);
+        }
+        last_added_ms = added_ms;
     }
-    // the heart rate sensor lib will have to take the pin used to receive the data
-    // it will look for any changes from 0 to 1 on that pin
-    // use the averaged distance between all heart beats
-    // this is measured:
-    // next: Option = none;
-    // if let Some(last_time_of_peak) in the 10 seconds
-    // next = time_of_peak - last_time_of_peak;
-    // last_time_of_peak = time_of_peak;
-    // else
-    // last_time_of_peak = time_of_peak
-    // if Some(next):
-    // if (avg == null)
-    // let avg = next;
-    // else
-    // let avg = (avg+next)/2
-    // next = None;
-    // where first, second and next are the differences between two beats.
-    // use modulo to get every 10 seconds
-    // and reset last_time_of_peak to None, when last_time > this_time
 
     let mut wifi = BlockingWifi::wrap(
         EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
