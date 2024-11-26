@@ -37,29 +37,21 @@ fn main() -> anyhow::Result<()> {
     // let (tx, rx) = mpsc::channel();
 
     let mut led = PinDriver::output(peripherals.pins.gpio20)?;
-    let mut button = PinDriver::input(peripherals.pins.gpio9)?;
+    let mut button = PinDriver::input(peripherals.pins.gpio3)?;
 
     button.set_pull(Pull::Down)?;
     let mut led_flag = true;
 
     loop {
         // we are using thread::sleep here to make sure the watchdog isn't triggered
-        FreeRtos::delay_ms(500);
-
-        if led_flag == true {
-            led_flag = false;
-            led.set_high()?;
-        } else {
-            led_flag = true;
-            led.set_low()?;
-        }
-        /*
+        FreeRtos::delay_ms(10);
         if button.is_high() {
-            led.set_low()?;
-        } else {
+            info!("it's high");
             led.set_high()?;
+        } else {
+            info!("it's low");
+            led.set_low()?;
         }
-        */
     }
     // the heart rate sensor lib will have to take the pin used to receive the data
     // it will look for any changes from 0 to 1 on that pin
