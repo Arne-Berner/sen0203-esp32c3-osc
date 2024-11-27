@@ -4,6 +4,8 @@ use esp_idf_svc::hal::{
 };
 use std::time::Instant;
 
+const CUTOFF: f32 = 0.2;
+
 pub struct Sen0203<'a, S: Pin, T: Pin> {
     led: PinDriver<'a, S, Output>,
     heartbeat: PinDriver<'a, T, Input>,
@@ -28,7 +30,7 @@ where
         let last_peak = Instant::now();
 
         // the difference between peaks
-        let avg_difference = 0.0;
+        let avg_difference_in_seconds = 1.0;
 
         Ok(Self {
             led,
@@ -36,39 +38,37 @@ where
             heart_was_low,
             last_peak,
             potential_current_peak,
-            avg_difference_in_seconds: avg_difference,
+            avg_difference_in_seconds,
         })
     }
 
     pub fn run(self: &mut Self) -> Option<f32> {
         FreeRtos::delay_ms(10);
 
-        if self.heartbeat.is_high() && self.heart_was_low {
+        if self.heartbeat.is_high() {
             // set current_peak
-            self.potential_current_peak = Some(Instant::now());
-            self.heart_was_low = false;
+            if self.heart_was_low {
+                self.potential_current_peak = Some(Instant::now());
+                self.heart_was_low = false;
+            }
+            let _ = self.set_led(true);
         }
 
         if self.heartbeat.is_low() {
             self.heart_was_low = true;
+            let _ = self.set_led(false);
         }
 
         if let Some(current_peak) = self.potential_current_peak {
-            self.potential_current_peak = None;
-
             // When the time resets, we need a different calculation for current difference
             let difference_in_seconds = current_peak.duration_since(self.last_peak).as_secs_f32();
 
             self.last_peak = current_peak;
+            self.potential_current_peak = None;
 
-            if difference_in_seconds > 0.2 {
-                // only the first valid difference
-                if self.avg_difference_in_seconds < 0.1 {
-                    self.avg_difference_in_seconds = difference_in_seconds;
-                } else {
-                    self.avg_difference_in_seconds =
-                        (self.avg_difference_in_seconds + difference_in_seconds) / 2.0;
-                }
+            if CUTOFF < difference_in_seconds {
+                self.avg_difference_in_seconds =
+                    (self.avg_difference_in_seconds + difference_in_seconds) / 2.0;
                 // can only be 0 < avg
                 return Some((1.0 / self.avg_difference_in_seconds) * 60.0);
             }
