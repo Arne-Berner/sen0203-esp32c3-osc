@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use log::*;
 use rosc::{self, OscMessage, OscPacket, OscType};
-use std::net::{SocketAddrV4, UdpSocket};
+use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 
 pub struct Osc {
     sock: UdpSocket,
@@ -24,7 +24,17 @@ impl Osc {
         }
     }
 
-    pub fn run(&mut self) -> Result<()> {
+    pub fn run(&mut self, addr: SocketAddr, topic: &str, args: OscType) -> Result<()> {
+        let msg_buf = rosc::encoder::encode(&OscPacket::Message(OscMessage {
+            addr: topic.to_string(),
+            args: vec![args],
+        }))?;
+
+        info!("Send bpm to {addr}");
+        self.sock.send_to(&msg_buf, addr)?;
+        Ok(())
+    }
+    pub fn ping(&mut self) -> Result<()> {
         match self.sock.recv_from(&mut self.buf) {
             Ok((size, addr)) => {
                 info!("Received packet with size {size} from: {addr}");
