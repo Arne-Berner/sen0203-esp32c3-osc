@@ -14,8 +14,6 @@ impl Osc {
         let recv_addr = SocketAddrV4::new(ip, port);
         let sock = UdpSocket::bind(recv_addr).unwrap();
         let buf = [0u8; rosc::decoder::MTU];
-        // TODO (remove all info)
-        info!("Listening to {recv_addr}");
 
         Self {
             sock,
@@ -29,11 +27,10 @@ impl Osc {
             addr: topic.to_string(),
             args: vec![args],
         }))?;
-
-        info!("Send bpm to {addr}");
         self.sock.send_to(&msg_buf, addr)?;
         Ok(())
     }
+
     pub fn ping(&mut self) -> Result<()> {
         match self.sock.recv_from(&mut self.buf) {
             Ok((size, addr)) => {

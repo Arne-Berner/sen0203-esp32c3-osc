@@ -1,3 +1,5 @@
+#![feature(addr_parse_ascii)]
+
 pub mod osc;
 mod sen0203;
 pub mod wifi;
@@ -11,54 +13,33 @@ use esp_idf_svc::{
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
 };
+use std::net::*;
 use std::sync::mpsc;
 
-use esp_idf_svc::hal::delay::FreeRtos;
-use esp_idf_svc::hal::gpio::{PinDriver, Pull};
 use log::*;
 
 const WIFI_SSID: &str = env!("OSC_WIFI_SSID");
 const WIFI_PASS: &str = env!("OSC_WIFI_PASS");
-const OSC_PORT: &str = env!("OSC_WIFI_RECV_PORT");
+const OSC_PORT: &str = env!("OSC_PORT");
+const OSC_IP: &str = env!("OSC_IP");
 
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    // Setup Wifi
-
     let peripherals = Peripherals::take()?;
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
-    // Create thread to get heart rate
-    // put tx in this heart rate thread
-    // (don't put it in the function, that will poll the heart rate sensor, but the thread)
-
     let (tx, rx) = mpsc::channel::<f32>();
 
-    let led_pin = peripherals.pins.gpio20;
-    let heartbeat_pin = peripherals.pins.gpio3;
-    let sen0203_join_handle = std::thread::Builder::new()
-        .stack_size(4096)
-        .spawn(move || {
-            let mut sen0203 =
-                Sen0203::new(led_pin, heartbeat_pin).expect("Could not initialize Sen0203");
-            loop {
-                if let Some(bpm) = sen0203.run() {
-                    info!("bpm:{:?}", bpm);
-                    tx.send(bpm);
-                }
-            }
-        })?;
-
+    // Setup Wifi
     let mut wifi = BlockingWifi::wrap(
         EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
         sys_loop,
     )?;
 
     let ip = connect_wifi(&mut wifi, WIFI_SSID, WIFI_PASS)?;
-    info!("IP INFO!!! {:?}", ip);
 
     // Create thread to receive/send OSC
     // Larger stack size is required (default is 3 KB)
@@ -70,15 +51,38 @@ fn main() -> anyhow::Result<()> {
             let mut osc = Osc::new(ip, port);
             loop {
                 let bpm = rx.recv().expect("bpm receive channel hung up");
-                if let Err(e) = osc.run() {
+                let bpm = rosc::OscType::Float(bpm);
+                let ip_in_bytes = OSC_IP.as_bytes();
+                let ip = Ipv4Addr::parse_ascii(ip_in_bytes).expect("could not convert it to ipv4");
+                let addr = SocketAddr::new(IpAddr::V4(ip), port);
+                if let Err(e) = osc.run(addr, "/test", bpm) {
                     error!("Failed to run OSC: {e}");
                     break;
+                }
+                // osc.ping();
+            }
+        })?;
+
+    let led_pin = peripherals.pins.gpio20;
+    let heartbeat_pin = peripherals.pins.gpio3;
+    let sen0203_join_handle = std::thread::Builder::new()
+        .stack_size(4096)
+        .spawn(move || {
+            let mut sen0203 =
+                Sen0203::new(led_pin, heartbeat_pin).expect("Could not initialize Sen0203");
+            loop {
+                if let Some(bpm) = sen0203.run() {
+                    if let Err(e) = tx.send(bpm) {
+                        error!("Failed to send bpm: {e}");
+                        break;
+                    }
                 }
             }
         })?;
 
     // can be used for reading the heart sensor for example.
-    // osc_join_handle.join().unwrap();
+    osc_join_handle.join().unwrap();
+    sen0203_join_handle.join().unwrap();
 
     // Keep wifi and the server running beyond when main() returns (forever)
     // Do not call this if you ever want to stop or access them later.
