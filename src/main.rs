@@ -43,6 +43,8 @@ fn main() -> anyhow::Result<()> {
 
     let mut heart_was_low = true;
 
+    // TODO this will add small differences, because it does not account for computation time
+    // replace with an actual timer?
     // create a timer
     let mut added_ms = 0.0;
     let mut last_added_ms = 0.0;
@@ -69,11 +71,6 @@ fn main() -> anyhow::Result<()> {
         FreeRtos::delay_ms(10);
 
         added_ms += 10.0;
-
-        // every 10 seconds, it gets reset
-        if added_ms < last_added_ms {
-            // use difference = current_peak - (last_peak -10);
-        }
         added_ms = added_ms % reset_time;
 
         if heartbeat.is_high() && heart_was_low {
@@ -81,6 +78,7 @@ fn main() -> anyhow::Result<()> {
             potential_current_peak = Some(added_ms);
             heart_was_low = false;
         }
+
         if heartbeat.is_low() {
             heart_was_low = true;
         }
@@ -88,6 +86,7 @@ fn main() -> anyhow::Result<()> {
         if let Some(current_peak) = potential_current_peak {
             potential_current_peak = None;
 
+            // only the first peak
             if let Some(last_peak) = potential_last_peak {
                 // When the time resets, we need a different calculation for current difference
                 let difference;
@@ -97,8 +96,10 @@ fn main() -> anyhow::Result<()> {
                     difference = current_peak - last_peak;
                 }
 
+                // only the first peak
                 potential_last_peak = Some(current_peak);
 
+                // only the first difference
                 if avg_difference == 0.0 {
                     avg_difference = difference;
                 } else {
@@ -109,9 +110,9 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        // 60 = 1000 / 1000 * 60
-        // 30 = 1000 / 2000 * 60
-        // 120 = 1000 / 500 * 60
+        // 60  = 1000ms / 1000ms * 60
+        // 30  = 1000ms / 2000ms * 60
+        // 120 = 1000ms / 500ms  * 60
 
         if avg_difference > 0.0 {
             info!("The bpm is: {:?}", (1000.0 / avg_difference) * 60.0);
