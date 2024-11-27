@@ -1,7 +1,4 @@
-use esp_idf_svc::hal::{
-    gpio::{Gpio20, Gpio3, PinDriver},
-    prelude::Peripherals,
-};
+use esp_idf_svc::hal::prelude::Peripherals;
 use heartbeatc3::sen0203::*;
 
 use log::*;
