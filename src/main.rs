@@ -1,6 +1,8 @@
 #![feature(addr_parse_ascii)]
 
+pub mod led;
 pub mod osc;
+use led::*;
 mod sen0203;
 pub mod wifi;
 use osc::Osc;
@@ -40,15 +42,17 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let ip = connect_wifi(&mut wifi, WIFI_SSID, WIFI_PASS)?;
+    let port = OSC_PORT.parse::<u16>().unwrap();
+    let led_pin = peripherals.pins.gpio20;
 
     // Create thread to receive/send OSC
     // Larger stack size is required (default is 3 KB)
     // You can customize default value by CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE in sdkconfig
-    let port = OSC_PORT.parse::<u16>().unwrap();
     let osc_join_handle = std::thread::Builder::new()
         .stack_size(8192)
         .spawn(move || {
             let mut osc = Osc::new(ip, port);
+            let mut led = LED::new(led_pin);
             loop {
                 let bpm = rx.recv().expect("bpm receive channel hung up");
                 let bpm = rosc::OscType::Float(bpm);
@@ -60,16 +64,17 @@ fn main() -> anyhow::Result<()> {
                     break;
                 }
                 // osc.ping();
+                led.set_led(true);
+                FreeRtos::delay_ms(100);
+                led.set_led(false);
             }
         })?;
 
-    let led_pin = peripherals.pins.gpio20;
     let heartbeat_pin = peripherals.pins.gpio3;
     let sen0203_join_handle = std::thread::Builder::new()
         .stack_size(4096)
         .spawn(move || {
-            let mut sen0203 =
-                Sen0203::new(led_pin, heartbeat_pin).expect("Could not initialize Sen0203");
+            let mut sen0203 = Sen0203::new(heartbeat_pin).expect("Could not initialize Sen0203");
             loop {
                 if let Some(bpm) = sen0203.run() {
                     if let Err(e) = tx.send(bpm) {
@@ -93,3 +98,6 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// TODO
+// Create function for the osc handler and the sensort handler for readability
